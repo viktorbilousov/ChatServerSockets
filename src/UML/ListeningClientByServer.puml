@@ -1,0 +1,18 @@
+@startuml
+(*) ->"Start"
+--> "check connect"
+if "client connected"
+    -->[false]"remove from list"
+    -->(*)
+else
+    if "first time"
+        -->[true] "send message log"
+        -->"wait message"
+        else
+        -->[false]"wait message"
+    endif
+    --> "decrypt message"
+    -> "send message to others clients"
+    --> "check connect"
+endif
+@enduml

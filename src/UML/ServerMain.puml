@@ -1,0 +1,22 @@
+@startuml
+(*)  --> "Initialisation server"
+--> " "
+ if "need close server" then
+    --> [false]"wait new client"
+    if "cnt client < max" then
+        -->[false] "Send connect server message"
+        --> "Add client to list"
+        --> "Start lisening socket client"
+        --> " "
+    else
+        --> [True] "Send desconnect server message"
+        --> "disconect"
+        --> " "
+     endif
+else
+-->[true]"disconect all client"
+-->"close server"
+-->(*)
+@enduml
+
+

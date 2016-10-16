@@ -1,0 +1,85 @@
+@startuml
+
+class Server{
+ - List<Message> messageLog;
+ - HashList<Client> clientList;
+ - final int MAX_CLIENT;
+ - final int MAX_LOG_MESSAGE;
+ - final String PORT;
+ - final String IP;
+
+ + Server(port, ip, maxClient, maxLogMes);
+ + Server(port, ip);
+ + Server(XML file);
+ ()
+ + bool start();
+ + bool close();
+ + bool restart();
+ ()
+ - bool initFromXml(XML file);
+ + XML getXMLSetting();
+ - bool readClientListFromXML(XML);
+ + XML getXMLClientList();
+ ()
+ - void initDefServer();
+ - void initServer();
+ - bool checkClient(client);
+ - void addClient(object);
+ - void removeClient(Client);
+ - void waitClient();
+ - void listenClient(client);
+ - bool closeClient(client);
+ - void errorCloseClient(client);
+ - String getClntMes(String message);
+ - String getServMes(String message);
+}
+class Client{
+- string name;
+- Socket socket;
+
++ Client(name, socket);
++ bool connect(ip, port);
++ bool disconnect();
++ bool sendMessage(string);
+()
+- bool errorDis();
+}
+
+class ConsoleServerControl{
++ ConsoleServerControl(server);
+}
+
+class ConsoleClientControl{
++ ConsoleClientControl(client);
+}
+
+class XMLHelper{
++ bool XMLReader(String path)
++ ? SAXParser(XML file);
++ ? DOMParser(XML file);
++ bool XMLWriter(string path);
+}
+
+class ClientStr{
+Socket socket
+String name
+int id;
+Client(name, socket, id)
+bool sendMessage(string message);
+}
+
+class Message{
++ string text
++ string data
++ string ip
++ string status
+}
+
+ConsoleClientControl *-- Client
+
+ConsoleServerControl *-- Server
+Server *-- Message
+XMLHelper <|-- Server
+Server *-- ClientStr
+
+@enduml
