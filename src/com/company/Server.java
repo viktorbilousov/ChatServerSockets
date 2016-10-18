@@ -5,15 +5,17 @@ import ServerException.InitExeption;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.HashMap;
+import java.util.List;
 
 /**
  * Created by belldell on 17.10.16.
  */
 public class Server {
-    private ArrayList<Message> messagLog;
-    private HashSet<ClientStr> clientList;
+    private List<Message> messagLog;
+    private List<ClientStr> clientList;
     private int maxClient = 10;
     private int maxLogMessage = 10;
     private String IP = "";
@@ -23,8 +25,10 @@ public class Server {
     private ServerSocket sSocket;
     private int clientID = 0;
 
-    //region Set\Get
-    public ServerStatus getStatus() {
+    private Thread waitThr = null;
+    private HashMap<Integer, Thread> clientThr; // ( ID client , futurThread
+
+    public ServerStatus getStThread() {
         return status;
     }
 
@@ -35,7 +39,6 @@ public class Server {
         this.status = status;
     }
 
-    //endregion
 
     //region constructots
     public Server(int maxClient, int maxLogMessage, String IP, int port) {
@@ -43,6 +46,7 @@ public class Server {
         this.maxLogMessage = maxLogMessage;
         this.IP = IP;
         this.port = port;
+
     }
 
     public Server(int port) {
@@ -52,11 +56,24 @@ public class Server {
 
     //endregion
 
+    public boolean testDisconnect()
+    {
+        if(clientList.size() == 0 || clientList == null)
+            return false;
+        if(messagLog.size() == 0 || messagLog == null)
+            return false;
+
+        disconnectClient(clientList.get(0));
+        return true;
+    }
 
     private void initServer() throws InitExeption
     {
+        disconnectAllClient();
+        waitThr = null;
         messagLog = new ArrayList<>();
-        clientList = new HashSet<>();
+        clientList = new ArrayList<>();
+        clientThr = new HashMap<>();
 
         try { sSocket = new ServerSocket(port); }
         catch (IOException e){
@@ -70,12 +87,10 @@ public class Server {
         setStatus(ServerStatus.LOAD);
         try {
             initServer();
-            //todo Closing
             System.out.println("Init OK!");
-            setStatus(ServerStatus.WORK);
-            //todo в другой поток
-            waitAndConnectClient();
-
+            setStatus(ServerStatus.RUN);
+            waitThr = new Thread(new WaitAndConnectClient());
+            waitThr.start();
         }
         catch (InitExeption e)
         {
@@ -84,44 +99,35 @@ public class Server {
             System.out.println("Init ERROR");
             return false;
         }
+        return true;
+    }
 
+    public boolean close()
+    {
+        if(status != ServerStatus.RUN)
+            return false;
 
-     /*  try {
-            System.out.println("Waiting for a client...");
-            Socket socket = ss.accept(); // заставляем сервер ждать подключений и выводим сообщение когда кто-то связался с сервером
-            System.out.println("Got a client :) ... Finally, someone saw me through all the cover!");
-            System.out.println();
+        try {
+        setStatus(ServerStatus.STOPING);
+        disconnectAllClient();
 
-            // Берем входной и выходной потоки сокета, теперь можем получать и отсылать данные клиенту.
-            InputStream sin = socket.getInputStream();
-            OutputStream sout = socket.getOutputStream();
+        if(!sSocket.isClosed())
+            sSocket.close();
 
-            // Конвертируем потоки в другой тип, чтоб легче обрабатывать текстовые сообщения.
-            DataInputStream in = new DataInputStream(sin);
-            DataOutputStream out = new DataOutputStream(sout);
+        waitThr.interrupt();
+        waitThr.join();
 
-            String line = null;
-            while(true) {
-                line = in.readUTF(); // ожидаем пока клиент пришлет строку текста.
-                System.out.println("The dumb clienthrows InitExeptiont just sent me this line : " + line);
-                System.out.println("I'm sending it back...");
-                System.out.println(line);
-                out.writeUTF(line); // отсылаем клиенту обратно ту самую строку текста.
-                out.flush(); // заставляем поток закончить передачу данных.
-                System.out.println("Waiting for the next line...");
-                System.out.println();
-                break;
-            }
-        } catch(ServerException x) {
-            x.printStackTrace();
-            return false;clienthrows
-        }*/
+        }catch (Exception E) {
+            System.out.println(E);
+        }
+        if(status == ServerStatus.STOPING)
+            setStatus(ServerStatus.STOP);
         return true;
     }
 
     private void waitAndConnectClient()
     {
-        while(status == ServerStatus.WORK) {
+        while(!waitThr.isInterrupted()) {
             System.out.println("wait new connect");
             try {
                 Socket socket = sSocket.accept();
@@ -132,21 +138,101 @@ public class Server {
                     socket = null;
                 } else {
                     synchronized (this) {
+                        Thread clThr = new Thread(new ListenClient(client));
                         clientList.add(client);
-                        // todo listen client
+                        clientThr.put(client.id, clThr);
+                        clThr.start();
                     }
                 }
-
-            } catch (IOException e) {
+            }catch (SocketException e)
+            {
+                if(e.getMessage().equals("Socket closed")){
+                    if(status != ServerStatus.STOPING) {
+                        setStatus(ServerStatus.ERROR);
+                        System.out.println("Need reconnect to socket");
+                    }
+                }
+            }
+            catch (IOException e) {
                 System.out.println(e);
                 System.out.println("client error connect!");
             }
         }
+        System.out.println("stop waiting!");
+    }
+
+    private void listenClient(ClientStr client)
+    {
+ //     soutAll();
+        try{
+            InputStream sin = client.socket.getInputStream();
+            DataInputStream in = new DataInputStream(sin);
+            String line = null;
+            Message m = null;
+            while(!Thread.interrupted()  && status == ServerStatus.RUN) {
+                line = in.readUTF(); // ожидаем пока клиент пришлет строку текста.
+                if(Thread.interrupted())
+                   break;
+                m = new Message(line);
+                messagLog.add(m);
+                
+                for (ClientStr cl: clientList ) {
+                    if(cl!=client)
+                        sendMessage(cl,m.toString());
+                }
+                System.out.println(line);
+            }
+        } catch(IOException E) {
+            System.out.println("Client disconnected!");
+        }
+        finally {
+            //if(!client.socket.isClosed())
+            sendMessage(client, ServerMessage.DISCONNECT, ATTEMPTS_SEND_MESSAGE);
+            removeClient(client);
+            System.out.println("Client disconect : " + client ) ;
+//            soutAll();
+        }
+    }
+
+    private void disconnectClient(ClientStr client){
+        Thread threadClient = clientThr.get(client.id);
+
+        try{
+            threadClient.interrupt();
+            client.socket.shutdownInput();
+
+            if(threadClient.isAlive())
+                threadClient.join();
+        }
+        catch (InterruptedException E){
+            System.out.println(E.toString());
+        }
+        catch (Exception E){
+            System.out.println(E);
+        }
+    }
+
+    private void disconnectAllClient()
+    {
+        if(clientList == null)
+            return;
+        
+        while(!clientList.isEmpty())
+            disconnectClient(clientList.get(0));
+        if(!clientThr.isEmpty())
+            System.out.println("Error disconnected!");
+    }
+    private synchronized void removeClient(ClientStr client){
+        if(clientThr.containsKey(client.id))
+            clientThr.remove(client.id);
+
+        if(clientList.contains(client))
+            clientList.remove(client);
     }
 
     private boolean sendMessage(ClientStr client, String message)
     {
-        //todo sendMessage
+        //// TODO: 18.10.16 rewrite with param Message(class) 
         try {
             System.out.println("Sending message to Client " + client);
             DataOutputStream out = new DataOutputStream(client.socket.getOutputStream());
@@ -161,12 +247,11 @@ public class Server {
         return true;
 
     }
-
     private boolean sendMessage(ClientStr clientStr, String message, int attempts)
     {
         if(attempts <= 0 ){
             System.out.println("ERROR ARG: attempts <= 0");
-            throw new IllegalArgumentException("attempts <= 0");
+            throw new IllegalArgumentException("attehis.clientList: ClientStr clientmpts <= 0");
         }
         boolean sending = false;
 
@@ -177,6 +262,45 @@ public class Server {
         }
 
         return false;
+    }
+    
+    private ClientStr getClient(int id)
+    {
+        for (ClientStr client: clientList) {
+            if(client.id == id)
+                return client;
+        }
+        return null;
+    }
+    private void soutAll()
+    {
+
+        System.out.println("Clients : ");
+        System.out.println(clientList.size());
+        for (ClientStr client: clientList) {
+            System.out.println(client.toString());
+        }
+        System.out.println("\nThreads : ");
+        for (Integer id :clientThr.keySet()) {
+            System.out.println("Id=" + id + " Thr="+clientThr.get(id));
+        }
+    }
+
+    private class WaitAndConnectClient implements Runnable{
+        @Override
+        public void run() {
+            waitAndConnectClient();
+        }
+    }
+    private class ListenClient implements Runnable{
+        private ClientStr clietnArg;
+
+        public ListenClient(ClientStr clietnArg) {
+            this.clietnArg = clietnArg;
+        }
+
+        @Override
+        public void run() {listenClient(clietnArg);}
     }
 
     private class ClientStr    {
@@ -207,12 +331,24 @@ public class Server {
     private synchronized int getNewID(){
         return ++clientID;
     }
+    private ClientStr containClient(String name)
+    {
+        for (ClientStr client : clientList) {
+            if(client.name.equals(name))
+                return client;
+        }
+        return null;
+    }
+    private static final class ServerMessage
+    {
+        public final static String DISCONNECT = "Disconnect message";
+    }
 
     public enum ServerStatus {
         STOP,
         ERROR,
         LOAD,
-        WORK,
+        RUN,
         STOPING
     }
 }
