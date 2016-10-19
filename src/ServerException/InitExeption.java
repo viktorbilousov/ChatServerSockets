@@ -5,6 +5,7 @@ import java.io.IOException;
 /**
  * Created by belldell on 17.10.16.
  */
+//// TODO: 18.10.16 delete and refactor 
 public class InitExeption extends IOException {
     public InitExeption() {
     }
